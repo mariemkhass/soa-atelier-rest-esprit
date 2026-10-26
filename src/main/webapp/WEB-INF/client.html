@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tester le service Options</title>
+<style>
+  :root { --rouge: #c8102e; --texte: #222; --bord: #d9d9d9; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: Arial, Helvetica, sans-serif; color: var(--texte);
+    background: linear-gradient(135deg, #f7f7f7 0%, #e4e4e6 100%);
+  }
+  .fenetre {
+    width: 640px; max-width: 94vw; background: #fff; border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.25); overflow: hidden; margin: 24px 0;
+  }
+  .barre { padding: 12px 16px; border-bottom: 1px solid #eee; }
+  .barre span { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; }
+  .barre .r { background: #ff5f57; } .barre .j { background: #febc2e; } .barre .v { background: #28c840; }
+  .contenu { padding: 22px 36px 30px; }
+  h2 { font-family: Georgia, "Times New Roman", serif; font-size: 20px; margin: 4px 0 18px; }
+  h3 { font-family: Georgia, "Times New Roman", serif; font-size: 15px; margin: 22px 0 10px;
+       color: var(--rouge); border-bottom: 1px solid #eee; padding-bottom: 6px; }
+  .ligne { display: flex; align-items: center; margin: 12px 0; gap: 12px; }
+  .ligne label { width: 150px; font-size: 12px; font-weight: bold; font-family: Georgia, serif; }
+  .ligne input[type=text], .ligne input[type=password] {
+    flex: 1; padding: 9px 12px; border: 1px solid var(--bord); border-radius: 6px;
+    font-size: 13px; background: #fff; min-width: 0;
+  }
+  .ligne input[readonly] { background: #fafafa; }
+  .ligne input:focus { outline: none; border-color: var(--rouge); }
+  button {
+    background: var(--rouge); color: #fff; border: 0; border-radius: 6px; cursor: pointer;
+    padding: 9px 26px; font-weight: bold; font-family: Georgia, serif; font-size: 13px;
+  }
+  button:hover { background: #a30d25; }
+  #etat { font-size: 12px; font-weight: bold; color: #888; }
+  #etat.ok { color: #1a8f3c; }
+</style>
+
+<script language="javascript">
+var API = "/Gestion_Options_Etudiants_war_exploded/rest";
+var accessToken = null, refreshToken = null;
+var dejaRetente = false;
+function newRequest() { return new XMLHttpRequest(); }
+
+function setEtat(msg) {
+  var e = document.getElementById("etat");
+  e.innerHTML = msg;
+  e.className = (msg == "Connecté") ? "ok" : "";
+}
+
+function login() {
+  var username = document.getElementById("username").value;
+  var password = document.getElementById("password").value;
+
+  var xmlhttp = newRequest();
+  xmlhttp.open('POST', API + "/authentication", true);
+  xmlhttp.setRequestHeader('Content-Type', 'application/json');
+  xmlhttp.onreadystatechange = function() {
+    if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+      var tokens = JSON.parse(xmlhttp.responseText);
+      accessToken  = tokens.accessToken;
+      refreshToken = tokens.refreshToken;
+      setEtat("Connecté");
+    } else if (xmlhttp.readyState == 4) {
+      alert("Login failed\n\nURL appelée : " + API + "/authentication"
+        + "\nStatut : " + xmlhttp.status
+        + "\nPage ouverte depuis : " + window.location.href
+        + "\nRéponse : " + xmlhttp.responseText.substring(0, 200)
+        + (xmlhttp.status == 0 ? "\n\nStatut 0 = requête bloquée (CORS) ou serveur injoignable." : ""));
+    }
+  };
+  xmlhttp.onerror = function() { console.log("Erreur réseau/CORS sur " + API + "/authentication"); };
+  xmlhttp.send(JSON.stringify({ username: username, password: password }));
+}
+
+function getOptions() {
+  var domaine = document.getElementById("domaine");
+  var code        = document.getElementById("code");
+  var libelle     = document.getElementById("libelle");
+  var responsable = document.getElementById("responsable");
+
+  if (accessToken == null) { alert("Veuillez d'abord vous connecter."); return; }
+
+  code.value = ""; libelle.value = ""; responsable.value = "";
+
+  var xmlhttp = newRequest();
+  var url = API + "/options?domaine=" + encodeURIComponent(domaine.value);
+  xmlhttp.open('GET', url, true);
+  xmlhttp.setRequestHeader('Authorization', 'Bearer ' + accessToken);
+
+  xmlhttp.onreadystatechange = function() {
+    if (xmlhttp.readyState == 4) {
+      if (xmlhttp.status == 200) {
+        dejaRetente = false;
+        var resultat = JSON.parse(xmlhttp.responseText);
+        for (var i in resultat) {
+          code.value        += " " + resultat[i].codeOption;
+          libelle.value     += " " + resultat[i].libelle;
+          responsable.value += " " + resultat[i].responsable;
+        }
+      } else if (xmlhttp.status == 401) {
+        refreshAndRetry();
+      } else {
+        alert("Error -> " + xmlhttp.status);
+      }
+    }
+  };
+  xmlhttp.send(null);
+}
+
+function refreshAndRetry() {
+  if (dejaRetente) {
+    dejaRetente = false;
+    alert("Session expired: please log in again");
+    return;
+  }
+  dejaRetente = true;
+
+  var xmlhttp = newRequest();
+  xmlhttp.open('POST', API + "/authentication/refresh", true);
+  xmlhttp.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+  xmlhttp.onreadystatechange = function() {
+    if (xmlhttp.readyState == 4) {
+      if (xmlhttp.status == 200) {
+        var tokens = JSON.parse(xmlhttp.responseText);
+        accessToken  = tokens.accessToken;
+        refreshToken = tokens.refreshToken;
+        getOptions();
+      } else {
+        dejaRetente = false;
+        accessToken = null; refreshToken = null;
+        setEtat("Non connecté");
+        alert("Session expired: please log in again");
+      }
+    }
+  };
+  xmlhttp.send("refreshToken=" + encodeURIComponent(refreshToken));
+}
+</script>
+</head>
+
+<body>
+  <div class="fenetre">
+    <div class="barre"><span class="r"></span><span class="j"></span><span class="v"></span></div>
+    <div class="contenu">
+      <h2>Tester le service Options</h2>
+
+      <h3>Connexion</h3>
+      <div class="ligne">
+        <label for="username">Login :</label>
+        <input type="text" id="username">
+      </div>
+      <div class="ligne">
+        <label for="password">Mot de passe :</label>
+        <input type="password" id="password">
+      </div>
+      <div class="ligne">
+        <label>&Eacute;tat :</label>
+        <span id="etat">Non connect&eacute;</span>
+        <span style="flex:1"></span>
+        <button type="button" onclick="login()">Se connecter</button>
+      </div>
+
+      <h3>Recherche</h3>
+      <div class="ligne">
+        <label for="domaine">Saisir le domaine :</label>
+        <input type="text" id="domaine" value="Informatique">
+        <button type="button" onclick="getOptions()">OK</button>
+      </div>
+      <div class="ligne">
+        <label for="code">Code :</label>
+        <input type="text" id="code" readonly>
+      </div>
+      <div class="ligne">
+        <label for="libelle">Titre :</label>
+        <input type="text" id="libelle" readonly>
+      </div>
+      <div class="ligne">
+        <label for="responsable">Responsable :</label>
+        <input type="text" id="responsable" readonly>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
